@@ -1,5 +1,5 @@
 # 🌱 Garden Planner - Plant Recommendation System
-
+NB: The pfaf scraped plant data is taken from https://github.com/saulshanabrook/pfaf-data
 An intelligent garden planning system that recommends suitable plants based on real environmental data and creates optimal plant clusters for companion planting.
 
 ## 📋 Features

@@ -1,1 +1,8 @@
-pandas, numpy, scikit-learn, matplotlib, meteostat, geopy, requests 
+geopy==2.4.1
+matplotlib
+meteostat==1.7.6
+numpy==1.26.4
+pandas==2.3.3
+requests
+scikit-learn==1.6.1
+xlsxWriter

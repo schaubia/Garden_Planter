@@ -5,6 +5,7 @@ import sys
 from io import StringIO
 import contextlib
 import builtins
+import importlib
 
 # Page configuration
 st.set_page_config(
@@ -45,37 +46,36 @@ st.markdown('<p style="text-align: center; font-size: 1.2rem;">An intelligent ga
 # Sidebar inputs
 st.sidebar.header("📍 Garden Configuration")
 
-garden_name = st.sidebar.text_input("Garden Name", value="My Garden", help="Give your garden a memorable name")
+garden_name = st.sidebar.text_input("Garden Name", value="My_Garden", help="Give your garden a memorable name (no spaces)")
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("📍 Location")
 
 col1, col2 = st.sidebar.columns(2)
-latitude = col1.number_input("Latitude", value=42.6977, format="%.4f", help="Enter your location's latitude (e.g., 42.6977)")
-longitude = col2.number_input("Longitude", value=23.3219, format="%.4f", help="Enter your location's longitude (e.g., 23.3219)")
+latitude = col1.number_input("Latitude", value=42.6977, format="%.4f", help="Enter your location's latitude")
+longitude = col2.number_input("Longitude", value=23.3219, format="%.4f", help="Enter your location's longitude")
 
 st.sidebar.markdown("""
 <div class="info-box" style="font-size: 0.9rem;">
-💡 <strong>Find your coordinates:</strong><br>
-1. Open Google Maps<br>
-2. Right-click your location<br>
-3. Click the coordinates to copy
+💡 <strong>Find coordinates:</strong><br>
+1. Google Maps<br>
+2. Right-click location<br>
+3. Copy coordinates
 </div>
 """, unsafe_allow_html=True)
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("⚙️ Recommendation Settings")
+st.sidebar.subheader("⚙️ Settings")
 
-num_recommendations = st.sidebar.slider("Number of Recommendations", min_value=10, max_value=200, value=100, step=10, help="How many plants to recommend")
-min_suitability = st.sidebar.slider("Minimum Suitability Score", min_value=0.0, max_value=1.0, value=0.5, step=0.05, help="Threshold for plant recommendations (0-1)")
-max_cluster_size = st.sidebar.slider("Max Plants per Cluster", min_value=3, max_value=10, value=5, step=1, help="Maximum number of plants grouped together")
+num_recommendations = st.sidebar.slider("Recommendations", 10, 200, 50, 10)
+min_suitability = st.sidebar.slider("Min Score", 0.0, 1.0, 0.5, 0.05)
+max_cluster_size = st.sidebar.slider("Max Cluster Size", 3, 10, 5, 1)
 
-generate_button = st.sidebar.button("🌿 Generate Garden Plan", type="primary", use_container_width=True)
+generate_button = st.sidebar.button("🌿 Generate Plan", type="primary", use_container_width=True)
 
-# Check if your main file exists
+# Check for required files
 if not os.path.exists('garden_planner_main.py'):
-    st.error("⚠️ garden_planner_main.py not found. Please ensure it's in your repository.")
-    st.info("Your repository should contain: garden_planner_main.py, garden_planner_core.py, pfaf2.csv")
+    st.error("⚠️ garden_planner_main.py not found")
     st.stop()
 
 # Initialize session state
@@ -85,8 +85,16 @@ if 'results_generated' not in st.session_state:
 if generate_button:
     st.session_state.results_generated = False
     
+    # Clean up old files first
+    for f in os.listdir('.'):
+        if f.endswith('_recommendations.csv') or f.endswith('_results.xlsx') or f.startswith('plant_clusters_max'):
+            try:
+                os.remove(f)
+            except:
+                pass
+    
     with st.spinner("🌱 Generating your garden plan..."):
-        # Create a queue of inputs to replace input() calls
+        # Prepare inputs
         input_queue = [
             garden_name,
             str(latitude),
@@ -96,79 +104,112 @@ if generate_button:
             str(max_cluster_size)
         ]
         
-        input_index = [0]  # Use list to make it mutable in nested function
-        
-        # Monkey-patch input() - FIXED for Python 3.13
+        input_index = [0]
         original_input = builtins.input
         
         def mock_input(prompt=""):
             if input_index[0] < len(input_queue):
                 value = input_queue[input_index[0]]
                 input_index[0] += 1
-                print(f"{prompt}{value}")  # Show what was "entered"
+                print(f"{prompt}{value}")
                 return value
             return ""
         
-        # Capture stdout
+        # Capture output
         captured_output = StringIO()
+        success = False
+        error_msg = None
         
         try:
-            # Replace input function
+            # Replace input
             builtins.input = mock_input
             
-            # Capture print statements
-            with contextlib.redirect_stdout(captured_output):
-                # Import and run the main script
-                import importlib
-                import garden_planner_main
-                
-                # Reload to ensure fresh execution
-                importlib.reload(garden_planner_main)
+            # Clear any cached imports
+            if 'garden_planner_main' in sys.modules:
+                del sys.modules['garden_planner_main']
+            if 'garden_planner_core' in sys.modules:
+                del sys.modules['garden_planner_core']
             
-            # Restore original input
+            with contextlib.redirect_stdout(captured_output):
+                with contextlib.redirect_stderr(captured_output):
+                    try:
+                        # Import and execute
+                        import garden_planner_main
+                        success = True
+                    except SystemExit:
+                        # Script may call sys.exit() - that's OK
+                        success = True
+                    except Exception as e:
+                        error_msg = str(e)
+                        import traceback
+                        print("\n" + "="*50)
+                        print("ERROR OCCURRED:")
+                        print("="*50)
+                        traceback.print_exc()
+            
+            # Restore input
             builtins.input = original_input
             
-            # Show output
+            # Get output
             output = captured_output.getvalue()
-            if output:
-                with st.expander("📋 Execution Log"):
-                    st.text(output)
+            
+            # Always show the log
+            with st.expander("📋 Execution Log", expanded=not success):
+                st.code(output, language="text")
+            
+            if error_msg:
+                st.error(f"❌ Error during execution: {error_msg}")
             
             # Look for generated files
-            csv_file = None
-            xlsx_file = None
-            png_files = []
+            st.write("🔍 Looking for generated files...")
             
-            # Find actual files
-            for f in os.listdir('.'):
-                if f.endswith('_recommendations.csv'):
-                    csv_file = f
-                elif f.endswith('_results.xlsx'):
-                    xlsx_file = f
-                elif f.startswith('plant_clusters_max') and f.endswith('.png'):
-                    png_files.append(f)
+            csv_files = [f for f in os.listdir('.') if f.endswith('_recommendations.csv')]
+            xlsx_files = [f for f in os.listdir('.') if f.endswith('_results.xlsx')]
+            png_files = [f for f in os.listdir('.') if f.startswith('plant_clusters_max') and f.endswith('.png')]
             
-            if csv_file and os.path.exists(csv_file):
-                df = pd.read_csv(csv_file)
-                st.session_state.results_df = df
-                st.session_state.csv_file = csv_file
-                st.session_state.xlsx_file = xlsx_file
-                st.session_state.png_files = png_files
-                st.session_state.results_generated = True
-                st.success("✅ Garden plan generated successfully!")
-                st.rerun()
+            st.write(f"Found {len(csv_files)} CSV files: {csv_files}")
+            st.write(f"Found {len(xlsx_files)} Excel files: {xlsx_files}")
+            st.write(f"Found {len(png_files)} PNG files: {png_files}")
+            
+            if csv_files:
+                csv_file = csv_files[0]
+                st.success(f"✅ Found results: {csv_file}")
+                
+                try:
+                    df = pd.read_csv(csv_file)
+                    st.write(f"📊 Loaded {len(df)} plant recommendations")
+                    
+                    st.session_state.results_df = df
+                    st.session_state.csv_file = csv_file
+                    st.session_state.xlsx_file = xlsx_files[0] if xlsx_files else None
+                    st.session_state.png_files = png_files
+                    st.session_state.results_generated = True
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Error reading CSV: {e}")
             else:
-                st.warning("⚠️ Results file not found. Check the execution log above.")
+                st.warning("⚠️ No results CSV file was generated.")
+                st.info("""
+                **Possible issues:**
+                1. The script may need different inputs
+                2. Check the execution log above for errors
+                3. The script may not be running to completion
+                
+                **Try:**
+                - Use a simpler garden name (no spaces or special characters)
+                - Reduce the number of recommendations to 20
+                - Check if pfaf2.csv exists and is readable
+                """)
                 
         except Exception as e:
-            builtins.input = original_input  # Restore on error
-            st.error(f"❌ Error: {str(e)}")
+            builtins.input = original_input
+            st.error(f"❌ Fatal error: {str(e)}")
             st.exception(e)
             
-            # Show output anyway
             output = captured_output.getvalue()
             if output:
-                st.text_area("Output:", output, height=300)
+                with st.expander("📋 Output"):
+                    st.code(output)
 
 # Display results
 if st.session_state.results_generated:
@@ -176,6 +217,9 @@ if st.session_state.results_generated:
     st.markdown('<h2 class="sub-header">🌿 Your Garden Plan</h2>', unsafe_allow_html=True)
     
     df = st.session_state.results_df
+    
+    # Show summary
+    st.write(f"**Total plants recommended:** {len(df)}")
     
     # Display top recommendations
     st.subheader("Top 10 Recommendations")
@@ -195,21 +239,19 @@ if st.session_state.results_generated:
     for idx, row in top_10.iterrows():
         col1, col2 = st.columns([4, 1])
         with col1:
-            # Try different column name variations
             name = row.get('common_name', row.get('Common Name', row.get('name', 'Unknown')))
             latin = row.get('latin_name', row.get('Latin Name', row.get('scientific_name', '')))
             st.markdown(f"**{name}**" + (f" *{latin}*" if latin else ""))
             
-            # Add more details if available
             family = row.get('family', row.get('Family', ''))
-            growth_rate = row.get('growth_rate', row.get('Growth Rate', ''))
-            if family or growth_rate:
-                details = []
+            growth = row.get('growth_rate', row.get('Growth Rate', ''))
+            if family or growth:
+                parts = []
                 if family:
-                    details.append(f"Family: {family}")
-                if growth_rate:
-                    details.append(f"Growth Rate: {growth_rate}")
-                st.caption(" | ".join(details))
+                    parts.append(f"Family: {family}")
+                if growth:
+                    parts.append(f"Growth: {growth}")
+                st.caption(" | ".join(parts))
         with col2:
             if score_col:
                 score = row[score_col]
@@ -217,23 +259,23 @@ if st.session_state.results_generated:
                 st.markdown(f"<h3 style='color: {color}; text-align: right;'>{score:.2f}</h3>", unsafe_allow_html=True)
         st.markdown("---")
     
-    # Download section
+    # Downloads
     st.markdown('<h2 class="sub-header">📥 Downloads</h2>', unsafe_allow_html=True)
     
-    col1, col2, col3 = st.columns(3)
+    cols = st.columns(3)
     
-    with col1:
+    with cols[0]:
         if st.session_state.csv_file and os.path.exists(st.session_state.csv_file):
             with open(st.session_state.csv_file, 'rb') as f:
                 st.download_button(
-                    "📄 CSV Recommendations",
+                    "📄 CSV File",
                     f.read(),
                     st.session_state.csv_file,
                     "text/csv",
                     use_container_width=True
                 )
     
-    with col2:
+    with cols[1]:
         if st.session_state.xlsx_file and os.path.exists(st.session_state.xlsx_file):
             with open(st.session_state.xlsx_file, 'rb') as f:
                 st.download_button(
@@ -244,77 +286,58 @@ if st.session_state.results_generated:
                     use_container_width=True
                 )
     
-    with col3:
+    with cols[2]:
         if st.session_state.png_files:
-            png_file = st.session_state.png_files[0]
-            if os.path.exists(png_file):
-                with open(png_file, 'rb') as f:
+            png = st.session_state.png_files[0]
+            if os.path.exists(png):
+                with open(png, 'rb') as f:
                     st.download_button(
-                        "🖼️ Cluster Visualization",
+                        "🖼️ Visualization",
                         f.read(),
-                        png_file,
+                        png,
                         "image/png",
                         use_container_width=True
                     )
     
-    # Show visualizations
+    # Visualizations
     if st.session_state.png_files:
-        st.markdown('<h2 class="sub-header">📊 Visualizations</h2>', unsafe_allow_html=True)
-        for png_file in st.session_state.png_files:
-            if os.path.exists(png_file):
-                st.image(png_file, caption=png_file, use_column_width=True)
+        st.markdown('<h2 class="sub-header">📊 Cluster Visualization</h2>', unsafe_allow_html=True)
+        for png in st.session_state.png_files:
+            if os.path.exists(png):
+                st.image(png, use_column_width=True)
     
-    # Full data table
-    with st.expander("📋 View All Recommendations"):
+    # Full table
+    with st.expander("📋 All Recommendations"):
         st.dataframe(df, use_container_width=True)
 
 else:
-    # Welcome message
+    # Welcome
     st.markdown("""
     ### 👋 Welcome to Garden Planner!
     
-    This intelligent system recommends suitable plants based on **real environmental data** from your location.
+    Get personalized plant recommendations based on your location's real environmental data.
     
-    #### How it works:
+    #### Quick Start:
     
-    1. **📍 Enter your location** - Provide accurate latitude and longitude coordinates
-    2. **⚙️ Configure preferences** - Set the number of recommendations and other parameters
-    3. **🌿 Generate plan** - Click the button to analyze and get recommendations
-    4. **📊 Review results** - Explore plant recommendations and clusters
-    5. **📥 Export** - Download your personalized garden plan
-    
-    #### Features:
-    
-    - 🌍 **Real climate data** - Uses actual weather and soil data from your location
-    - 🎯 **Smart scoring** - Evaluates plants based on hardiness, soil, shade, moisture, and more
-    - 🔄 **Intelligent clustering** - Groups compatible plants together
-    - 🤝 **Companion analysis** - Identifies beneficial plant relationships
-    - 📊 **Professional reports** - Export results to Excel with visualizations
+    1. 📍 **Enter location** - Use your coordinates (Google Maps → right-click → copy)
+    2. ⚙️ **Adjust settings** - Number of plants, score threshold, cluster size
+    3. 🌿 **Generate** - Click the button in sidebar
+    4. 📥 **Download** - Get your CSV and Excel reports
     
     ---
     
-    **Ready to start?** Configure your garden in the sidebar and click "Generate Garden Plan"!
+    **Ready?** Configure settings in the sidebar and click "Generate Plan"!
     """)
     
-    # Example locations
-    with st.expander("🗺️ Example Locations"):
+    with st.expander("🗺️ Example Coordinates"):
         st.markdown("""
-        Try these example coordinates:
-        
         - **Sofia, Bulgaria**: 42.6977, 23.3219
         - **London, UK**: 51.5074, -0.1278
         - **New York, USA**: 40.7128, -74.0060
-        - **Tokyo, Japan**: 35.6762, 139.6503
-        - **Sydney, Australia**: -33.8688, 151.2093
+        - **Los Angeles, USA**: 34.0522, -118.2437
         - **Paris, France**: 48.8566, 2.3522
-        - **Vancouver, Canada**: 49.2827, -123.1207
         """)
 
 # Footer
 st.markdown("---")
-st.markdown("""
-<div style="text-align: center; color: #666; padding: 2rem;">
-    <p>🌱 Garden Planner - Making gardening easier with data-driven recommendations</p>
-    <p style="font-size: 0.9rem;">Based on real climate data, PFAF plant database, and companion planting research</p>
-</div>
-""", unsafe_allow_html=True)
+st.caption("🌱 Garden Planner • Data-driven recommendations based on climate, soil, and plant compatibility")

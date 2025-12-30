@@ -92,7 +92,16 @@ with st.sidebar:
                            help="Maximum plants grouped together for companion planting")
     
     st.markdown("---")
-    generate = st.button("🌿 Generate Garden Plan", type="primary", use_container_width=True)
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        generate = st.button("🌿 Generate", type="primary", use_container_width=True)
+    with col2:
+        if st.button("🔄 Reset", use_container_width=True):
+            st.session_state.log = []
+            st.session_state.results = None
+            st.session_state.show_log = False
+            st.rerun()
     
     # Quick examples
     with st.expander("📍 Example Locations"):
@@ -309,7 +318,7 @@ if st.session_state.results:
     
     # Summary metrics
     st.markdown("### 📊 Garden Summary")
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3 = st.columns(3)
     
     with col1:
         st.metric("Total Plants", len(df))
@@ -320,9 +329,6 @@ if st.session_state.results:
             st.metric("Avg Suitability", f"{avg_score:.2f}")
     with col3:
         st.metric("Location", st.session_state.results['location'])
-    with col4:
-        families = df['family'].nunique() if 'family' in df.columns else 0
-        st.metric("Plant Families", families)
     
     st.markdown("---")
     
@@ -349,26 +355,28 @@ if st.session_state.results:
                         st.caption(f"*{latin_name}*")
                     
                     # Details in columns
-                    detail_cols = st.columns(4)
+                    detail_cols = st.columns(3)
                     
                     with detail_cols[0]:
-                        family = row.get('family', row.get('Family', 'Unknown'))
-                        st.caption(f"🌿 Family: {family}")
-                    
-                    with detail_cols[1]:
                         shade = row.get('shade', row.get('Shade', ''))
                         if shade and shade in FIELD_EXPLANATIONS['Shade']:
                             st.caption(f"☀️ {FIELD_EXPLANATIONS['Shade'][shade]}")
+                        else:
+                            st.caption("☀️ Shade info not available")
                     
-                    with detail_cols[2]:
+                    with detail_cols[1]:
                         moisture = row.get('moisture', row.get('Moisture', ''))
                         if moisture and moisture in FIELD_EXPLANATIONS['Moisture']:
                             st.caption(f"💧 {FIELD_EXPLANATIONS['Moisture'][moisture]}")
+                        else:
+                            st.caption("💧 Moisture info not available")
                     
-                    with detail_cols[3]:
+                    with detail_cols[2]:
                         growth = row.get('growth_rate', row.get('Growth Rate', ''))
                         if growth:
                             st.caption(f"📈 Growth: {growth}")
+                        else:
+                            st.caption("📈 Growth info not available")
                 
                 with col2:
                     score = row[score_col]

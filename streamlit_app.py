@@ -75,7 +75,9 @@ if generate_button:
         input_index = [0]  # Use list to make it mutable in nested function
         
         # Monkey-patch input()
-        original_input = __builtins__.input
+        # Handle both dict and module forms of __builtins__
+        import builtins
+        original_input = builtins.input
         
         def mock_input(prompt=""):
             if input_index[0] < len(input_queue):
@@ -90,7 +92,7 @@ if generate_button:
         
         try:
             # Replace input function
-            __builtins__.input = mock_input
+            builtins.input = mock_input
             
             # Capture print statements
             with contextlib.redirect_stdout(captured_output):
@@ -102,7 +104,7 @@ if generate_button:
                 importlib.reload(garden_planner_main)
             
             # Restore original input
-            __builtins__.input = original_input
+            builtins.input = original_input
             
             # Show output
             output = captured_output.getvalue()
@@ -141,7 +143,7 @@ if generate_button:
                 st.warning("⚠️ Results file not found. Check the execution log above.")
                 
         except Exception as e:
-            __builtins__.input = original_input  # Restore on error
+            builtins.input = original_input  # Restore on error
             st.error(f"❌ Error: {str(e)}")
             st.exception(e)
             

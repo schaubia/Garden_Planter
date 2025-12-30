@@ -38,6 +38,12 @@ st.markdown("""
 
 # Import the garden planner functions
 # These would come from garden_planner_core.py
+import sys
+import traceback
+
+CORE_AVAILABLE = False
+IMPORT_ERROR = None
+
 try:
     from garden_planner_core import (
         Config, LocationAnalyzer, PlantDatabase, 
@@ -45,9 +51,12 @@ try:
         CompanionPlantAnalyzer, ResultsExporter
     )
     CORE_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    IMPORT_ERROR = str(e)
     CORE_AVAILABLE = False
-    st.error("⚠️ Core garden planner modules not found. Please ensure garden_planner_core.py is in the same directory.")
+except Exception as e:
+    IMPORT_ERROR = f"Unexpected error: {str(e)}\n{traceback.format_exc()}"
+    CORE_AVAILABLE = False
 
 # Title
 st.markdown('<h1 class="main-header">🌱 Garden Planner</h1>', unsafe_allow_html=True)
@@ -126,16 +135,42 @@ generate_button = st.sidebar.button("🌿 Generate Garden Plan", type="primary",
 
 # Main content area
 if not CORE_AVAILABLE:
-    st.warning("""
-    ### Setup Required
+    st.error("⚠️ Setup Required")
     
-    Please ensure the following files are present:
+    st.warning(f"""
+    ### Debug Information
+    
+    **Import Error:** {IMPORT_ERROR}
+    
+    **Current Working Directory:** {os.getcwd()}
+    
+    **Files in Current Directory:**
+    """)
+    
+    # List files in current directory
+    try:
+        files_in_dir = os.listdir('.')
+        st.code('\n'.join(sorted(files_in_dir)))
+    except Exception as e:
+        st.error(f"Could not list files: {e}")
+    
+    st.info("""
+    ### Required Files
+    
+    Please ensure the following files are present in your repository:
     - `garden_planner_core.py`
     - `pfaf2.csv` (plant database)
     - `companion_plants.csv` (optional)
     
-    Upload these files to your Streamlit deployment or place them in the same directory as this app.
+    ### Troubleshooting Steps:
+    
+    1. **Check your repository structure** - All files should be in the root directory
+    2. **Verify file names** - Check for typos or different naming
+    3. **Check the Streamlit Cloud logs** - Look for specific import errors
+    4. **Try redeploying** - Sometimes a fresh deployment helps
     """)
+    
+    st.stop()
 else:
     # Initialize session state
     if 'results_generated' not in st.session_state:

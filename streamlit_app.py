@@ -5,7 +5,6 @@ import sys
 from io import StringIO
 import contextlib
 import builtins
-import traceback
 
 # Page configuration
 st.set_page_config(
@@ -89,35 +88,43 @@ if generate:
     # Capture output
     captured = StringIO()
     
-    log("📦 Importing modules...")
+    log("📜 Executing garden_planner_main.py...")
     try:
         # Clear cache
         if 'garden_planner_main' in sys.modules:
             del sys.modules['garden_planner_main']
-            log("  Cleared garden_planner_main from cache")
         if 'garden_planner_core' in sys.modules:
             del sys.modules['garden_planner_core']
-            log("  Cleared garden_planner_core from cache")
         
-        log("  Importing garden_planner_main...")
+        # Read and execute the file
+        log("  Reading file...")
+        with open('garden_planner_main.py', 'r') as f:
+            code = f.read()
+        
+        log(f"  File size: {len(code)} characters")
+        log("  Executing code...")
+        
+        # Create a namespace for execution
+        namespace = {
+            '__name__': '__main__',  # This is KEY - makes if __name__ == '__main__' work!
+            '__file__': 'garden_planner_main.py',
+            '__builtins__': builtins
+        }
         
         with contextlib.redirect_stdout(captured):
             with contextlib.redirect_stderr(captured):
                 try:
-                    import garden_planner_main
-                    log("  ✅ Import successful")
-                    
-                    # Try to reload/run
-                    log("  Reloading module...")
-                    import importlib
-                    importlib.reload(garden_planner_main)
-                    log("  ✅ Reload successful")
-                    
+                    exec(code, namespace)
+                    log("  ✅ Execution complete")
                 except SystemExit as e:
                     log(f"  Script called sys.exit({e.code})")
                 except Exception as e:
-                    log(f"  ❌ Error: {str(e)}")
-                    log(f"  Traceback: {traceback.format_exc()}")
+                    log(f"  ❌ Error during execution: {str(e)}")
+                    import traceback
+                    log("")
+                    log("Traceback:")
+                    for line in traceback.format_exc().split('\n'):
+                        log(f"  {line}")
         
         output = captured.getvalue()
         if output:
@@ -127,10 +134,15 @@ if generate:
             for line in output.split('\n'):
                 if line.strip():
                     log(f"  {line}")
+        else:
+            log("")
+            log("⚠️ Script produced no output")
         
     except Exception as e:
         log(f"❌ Fatal error: {str(e)}")
-        log(traceback.format_exc())
+        import traceback
+        for line in traceback.format_exc().split('\n'):
+            log(f"  {line}")
     finally:
         builtins.input = original_input
         log("")
@@ -165,6 +177,10 @@ if generate:
     else:
         log("")
         log("❌ No results generated")
+        log("")
+        log("💡 Debug info:")
+        log(f"  Inputs provided: {input_idx[0]} out of {len(inputs)}")
+        log(f"  Script output length: {len(captured.getvalue())} chars")
     
     st.rerun()
 

@@ -5,7 +5,7 @@ matplotlib>=3.4.0
 scikit-learn>=0.24.0
 requests>=2.26.0
 geopy>=2.2.0
-meteostat>=1.6.0
+meteostat==1.6.5
 xlsxwriter>=3.0.0
 openpyxl>=3.0.0
 Pillow>=9.0.0

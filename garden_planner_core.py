@@ -14,7 +14,20 @@ import pandas as pd
 import numpy as np
 import requests
 from geopy.geocoders import Nominatim
-from meteostat import Point, Daily
+
+# Handle both old and new meteostat versions
+try:
+    from meteostat import Point, Daily
+except ImportError:
+    # Newer versions of meteostat changed the import structure
+    try:
+        from meteostat import Point
+        from meteostat.daily import Daily
+    except ImportError:
+        # If meteostat is completely unavailable, set to None and handle gracefully
+        Point = None
+        Daily = None
+
 import matplotlib.pyplot as plt
 import io
 import re
@@ -341,12 +354,22 @@ class ClimateDataFetcher:
         """Fetch historical climate data from Meteostat"""
         print(f"🌡️ Fetching climate data for ({lat:.4f}, {lon:.4f})...")
         
-        location = Point(lat, lon)
-        start = datetime(start_year, 1, 1)
-        end = datetime(end_year, 12, 31)
+        # Check if meteostat is available
+        if Point is None or Daily is None:
+            print("⚠️ Meteostat library not available, using defaults")
+            return pd.DataFrame()
         
-        data = Daily(location, start, end)
-        return data.fetch()
+        try:
+            location = Point(lat, lon)
+            start = datetime(start_year, 1, 1)
+            end = datetime(end_year, 12, 31)
+            
+            data = Daily(location, start, end)
+            return data.fetch()
+        except Exception as e:
+            print(f"⚠️ Error fetching climate data: {e}")
+            print("   Using default climate values")
+            return pd.DataFrame()
     
     def generate_climate_scenarios(self, location_id: int, lat: float, lon: float) -> List[ClimateData]:
         """Generate climate scenarios (historical + projections)"""

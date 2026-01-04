@@ -18,38 +18,23 @@ An intelligent garden planning system that recommends suitable plants based on r
 - Python 3.8 or higher
 - pip (Python package manager)
 
-### Required Files
-
-Make sure you have these files in your project directory:
-- `garden_planner_main.py` - Main executable script
-- `garden_planner_core.py` - Core classes and functions
-- `pfaf2.csv` - Plant database (required)
-- `companion_plants.csv` - Companion plant relationships (optional)
-
-### Install Dependencies
-
+1. **Clone the repository**
 ```bash
-pip install pandas numpy matplotlib scikit-learn requests geopy meteostat xlsxwriter
+git clone https://github.com/Schaubia/Garden_Planter.git
+cd Garden_Planter
 ```
 
-Or create a `requirements.txt` file:
-
-```
-pandas>=1.3.0
-numpy>=1.21.0
-matplotlib>=3.4.0
-scikit-learn>=0.24.0
-requests>=2.26.0
-geopy>=2.2.0
-meteostat>=1.6.0
-xlsxwriter>=3.0.0
-```
-
-Then install:
-
+2. **Create a virtual environment** (recommended)
 ```bash
-pip install -r requirements.txt
+python -m venv venv
+
+# On Windows
+venv\Scripts\activate
+
+# On macOS/Linux
+source venv/bin/activate
 ```
+
 
 ## 🚀 Usage
 
@@ -110,25 +95,6 @@ The program generates three output files:
    - Visual representation of plant clusters
    - PCA projection showing plant relationships
 
-## 📁 Project Structure
-
-```
-garden-planner/
-│
-├── garden_planner_main.py      # Main executable with user input
-├── garden_planner_core.py      # Core classes and functions
-├── pfaf2.csv                   # Plant database (required)
-├── companion_plants.csv        # Companion plants (optional)
-├── requirements.txt            # Python dependencies
-├── README.md                   # This file
-│
-├── data/                       # Created automatically
-│   ├── raw/
-│   └── processed/
-│
-├── garden_planner.db           # SQLite database (created automatically)
-└── [output files]              # Generated CSV, Excel, PNG files
-```
 
 ## 🎯 How It Works
 

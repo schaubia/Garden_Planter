@@ -2,11 +2,25 @@ import streamlit as st
 import pandas as pd
 import os
 import sys
-from io import StringIO
-import contextlib
-import builtins
+from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 import io
+import traceback
+
+# Add current directory to path
+sys.path.insert(0, str(Path(__file__).parent))
+
+# Import the core module directly
+try:
+    from garden_planner_core import (
+        GardenPlanner, 
+        PlantClusteringModule, 
+        Config
+    )
+except ImportError as e:
+    st.error(f"❌ Error importing garden_planner_core.py: {e}")
+    st.error("Please ensure garden_planner_core.py is in the same directory as this app.")
+    st.stop()
 
 # Page configuration
 st.set_page_config(
@@ -75,9 +89,9 @@ with st.sidebar:
     
     col1, col2 = st.columns(2)
     with col1:
-        latitude = st.number_input("Latitude", value=42.6977, format="%.4f")
+        latitude = st.number_input("Latitude", value=42.6977, format="%.4f", min_value=-90.0, max_value=90.0)
     with col2:
-        longitude = st.number_input("Longitude", value=23.3219, format="%.4f")
+        longitude = st.number_input("Longitude", value=23.3219, format="%.4f", min_value=-180.0, max_value=180.0)
     
     st.info("💡 **Tip:** Right-click on Google Maps and copy coordinates")
     
@@ -98,9 +112,8 @@ with st.sidebar:
         generate = st.button("🌿 Generate", type="primary", use_container_width=True)
     with col2:
         if st.button("🔄 Reset", use_container_width=True):
-            st.session_state.log = []
-            st.session_state.results = None
-            st.session_state.show_log = False
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
             st.rerun()
     
     # Quick examples
@@ -182,132 +195,141 @@ def add_legend_to_image(image_path):
             return io.BytesIO(f.read())
 
 # Initialize session state
-if 'log' not in st.session_state:
-    st.session_state.log = []
+if 'results' not in st.session_state:
     st.session_state.results = None
-    st.session_state.show_log = False
 
 if generate:
-    st.session_state.log = []
     st.session_state.results = None
-    st.session_state.show_log = False
     
-    def log(msg):
-        st.session_state.log.append(msg)
+    # Check for required files
+    plant_db = "pfaf2.csv"
+    companion_db = "companion_plants.csv"
+    
+    if not Path(plant_db).exists():
+        st.error(f"❌ Error: Plant database '{plant_db}' not found! Please ensure it's in the deployment directory.")
+        st.stop()
+    
+    companion_available = Path(companion_db).exists()
+    if not companion_available:
+        st.warning(f"⚠️ Warning: Companion plants database '{companion_db}' not found. Companion analysis will be skipped.")
     
     # Progress indicator
     progress_bar = st.progress(0)
     status_text = st.empty()
     
-    status_text.text("🧹 Preparing environment...")
-    progress_bar.progress(10)
-    
-    # Clean old files
-    for f in os.listdir('.'):
-        if '_recommendations.csv' in f or '_results.xlsx' in f:
-            try:
-                os.remove(f)
-            except:
-                pass
-    
-    # Prepare inputs
-    inputs = [garden_name.replace(' ', '_'), str(latitude), str(longitude), 
-              str(num_rec), str(min_score), str(max_cluster)]
-    
-    log("🚀 Garden Planner Execution")
-    log(f"Garden: {garden_name}")
-    log(f"Location: {latitude}, {longitude}")
-    log(f"Settings: {num_rec} plants, score>={min_score}, cluster<={max_cluster}")
-    log("")
-    
-    input_idx = [0]
-    original_input = builtins.input
-    
-    def mock_input(prompt=""):
-        if input_idx[0] < len(inputs):
-            val = inputs[input_idx[0]]
-            input_idx[0] += 1
-            log(f"Input: {prompt}{val}")
-            return val
-        return ""
-    
-    builtins.input = mock_input
-    captured = StringIO()
-    
-    status_text.text("🌱 Analyzing location and generating recommendations...")
-    progress_bar.progress(30)
-    
     try:
-        # Clear cache
-        if 'garden_planner_main' in sys.modules:
-            del sys.modules['garden_planner_main']
-        if 'garden_planner_core' in sys.modules:
-            del sys.modules['garden_planner_core']
+        # Clean old files
+        status_text.text("🧹 Cleaning old files...")
+        progress_bar.progress(5)
+        for f in os.listdir('.'):
+            if '_recommendations.csv' in f or '_results.xlsx' in f or 'plant_clusters' in f:
+                try:
+                    os.remove(f)
+                except:
+                    pass
         
-        # Execute the script
-        with open('garden_planner_main.py', 'r') as f:
-            code = f.read()
+        # Update config
+        Config.MAX_CLUSTER_SIZE = max_cluster
         
-        namespace = {
-            '__name__': '__main__',
-            '__file__': 'garden_planner_main.py',
-            '__builtins__': builtins
+        # Initialize planner
+        status_text.text("🚀 Initializing Garden Planner...")
+        progress_bar.progress(10)
+        
+        planner = GardenPlanner(use_vectorized=True)
+        planner.initialize(plant_db)
+        
+        # Add location
+        status_text.text("📍 Fetching location data...")
+        progress_bar.progress(30)
+        
+        location_id = planner.add_location(latitude, longitude, garden_name)
+        
+        # Get recommendations
+        status_text.text("🌱 Calculating plant recommendations...")
+        progress_bar.progress(50)
+        
+        recommendations = planner.get_recommendations(location_id, num_rec, min_score)
+        
+        if recommendations.empty:
+            progress_bar.empty()
+            status_text.empty()
+            st.warning("⚠️ No suitable plants found with the given criteria. Try lowering the minimum suitability score.")
+            st.stop()
+        
+        # Export to CSV
+        status_text.text("💾 Saving recommendations...")
+        progress_bar.progress(60)
+        
+        csv_filename = f"{garden_name.replace(' ', '_')}_recommendations.csv"
+        recommendations.to_csv(csv_filename, index=False)
+        
+        # Perform clustering
+        status_text.text("🔬 Clustering plants...")
+        progress_bar.progress(70)
+        
+        clustered_df = PlantClusteringModule.cluster_plants(recommendations, max_cluster)
+        
+        # Visualize clusters
+        status_text.text("📊 Creating visualizations...")
+        progress_bar.progress(80)
+        
+        fig = PlantClusteringModule.visualize_clusters(clustered_df, garden_name)
+        
+        # Find companion plant relationships
+        cluster_companions = {}
+        if companion_available:
+            status_text.text("🤝 Analyzing companion relationships...")
+            progress_bar.progress(85)
+            
+            cluster_companions = PlantClusteringModule.find_companions(
+                clustered_df, companion_db
+            )
+        
+        # Export to Excel
+        status_text.text("📊 Generating Excel report...")
+        progress_bar.progress(90)
+        
+        excel_filename = f"{garden_name.replace(' ', '_')}_results.xlsx"
+        PlantClusteringModule.export_to_excel(
+            clustered_df, cluster_companions, fig, garden_name, excel_filename
+        )
+        
+        # Look for PNG files
+        status_text.text("🔍 Collecting results...")
+        progress_bar.progress(95)
+        
+        png_files = [f for f in os.listdir('.') if 'plant_cluster' in f and f.endswith('.png')]
+        
+        # Store results
+        st.session_state.results = {
+            'df': clustered_df,
+            'csv': csv_filename,
+            'xlsx': excel_filename,
+            'png': png_files,
+            'garden_name': garden_name,
+            'location': f"{latitude}, {longitude}",
+            'num_clusters': clustered_df['cluster'].nunique(),
+            'num_companions': sum(len(df) for df in cluster_companions.values()) if cluster_companions else 0
         }
         
-        with contextlib.redirect_stdout(captured):
-            with contextlib.redirect_stderr(captured):
-                try:
-                    exec(code, namespace)
-                    log("\n✅ Execution completed successfully")
-                except SystemExit:
-                    log("\n✅ Script completed")
-                except Exception as e:
-                    log(f"\n❌ Error: {str(e)}")
+        status_text.text("✅ Complete!")
+        progress_bar.progress(100)
         
-        output = captured.getvalue()
-        if output:
-            log("\n--- Script Output ---")
-            log(output)
+        import time
+        time.sleep(0.5)
+        status_text.empty()
+        progress_bar.empty()
+        
+        st.success("✅ Garden plan generated successfully!")
+        st.rerun()
         
     except Exception as e:
-        log(f"\n❌ Fatal error: {str(e)}")
-    finally:
-        builtins.input = original_input
-    
-    status_text.text("🔍 Collecting results...")
-    progress_bar.progress(80)
-    
-    # Look for files
-    csv_files = [f for f in os.listdir('.') if f.endswith('_recommendations.csv')]
-    xlsx_files = [f for f in os.listdir('.') if f.endswith('_results.xlsx')]
-    png_files = [f for f in os.listdir('.') if 'plant_cluster' in f and f.endswith('.png')]
-    
-    if csv_files:
-        try:
-            df = pd.read_csv(csv_files[0])
-            st.session_state.results = {
-                'df': df,
-                'csv': csv_files[0],
-                'xlsx': xlsx_files[0] if xlsx_files else None,
-                'png': png_files,
-                'garden_name': garden_name,
-                'location': f"{latitude}, {longitude}"
-            }
-            log(f"\n✅ Successfully loaded {len(df)} plant recommendations")
-        except Exception as e:
-            log(f"\n❌ Error loading results: {e}")
-    else:
-        log("\n❌ No results generated")
-    
-    status_text.text("✅ Complete!")
-    progress_bar.progress(100)
-    
-    import time
-    time.sleep(0.5)
-    status_text.empty()
-    progress_bar.empty()
-    
-    st.rerun()
+        progress_bar.empty()
+        status_text.empty()
+        st.error(f"❌ Error generating garden plan: {str(e)}")
+        with st.expander("🔍 Error Details (for debugging)"):
+            st.code(traceback.format_exc())
+        st.stop()
 
 # Display Results
 if st.session_state.results:
@@ -318,7 +340,7 @@ if st.session_state.results:
     
     # Summary metrics
     st.markdown("### 📊 Garden Summary")
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     
     with col1:
         st.metric("Total Plants", len(df))
@@ -328,6 +350,8 @@ if st.session_state.results:
             avg_score = df[score_col].mean()
             st.metric("Avg Suitability", f"{avg_score:.2f}")
     with col3:
+        st.metric("Clusters", st.session_state.results['num_clusters'])
+    with col4:
         st.metric("Location", st.session_state.results['location'])
     
     st.markdown("---")
@@ -478,78 +502,63 @@ if st.session_state.results:
     # Full data table
     with st.expander("📋 View Complete Plant Database"):
         st.dataframe(df, use_container_width=True, height=400)
-    
-    # Optional: Execution log (collapsed by default)
-    if st.session_state.log:
-        with st.expander("🔧 Technical Log (for debugging)"):
-            log_text = '\n'.join(st.session_state.log)
-            st.text_area("Execution Log", log_text, height=300)
-            
-            # Download log
-            st.download_button(
-                label="📥 Download Log",
-                data=log_text,
-                file_name="garden_planner_log.txt",
-                mime="text/plain"
-            )
 
 else:
     # Welcome screen
-    if not st.session_state.log:
+    st.markdown("""
+    ### 👋 Welcome to Garden Planner!
+    
+    Get personalized plant recommendations based on your location's real environmental data including:
+    
+    - 🌡️ **Climate Analysis** - Temperature, rainfall, and hardiness zones
+    - 🌍 **Soil Assessment** - pH levels and soil composition
+    - 🗺️ **Geographic Data** - Altitude and regional characteristics
+    - 🤝 **Companion Planting** - Plants that grow well together
+    
+    #### How to Get Started:
+    
+    1. **📍 Enter Your Location** - Use your garden's coordinates (find them on Google Maps)
+    2. **⚙️ Adjust Preferences** - Set the number of plants and suitability threshold
+    3. **🌿 Generate** - Click the button to create your personalized garden plan
+    4. **📥 Download** - Save your results as CSV, Excel, or visualization
+    
+    ---
+    
+    Ready to start planning your dream garden? Configure your settings in the sidebar! 🌱
+    """)
+    
+    # Feature highlights
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
         st.markdown("""
-        ### 👋 Welcome to Garden Planner!
-        
-        Get personalized plant recommendations based on your location's real environmental data including:
-        
-        - 🌡️ **Climate Analysis** - Temperature, rainfall, and hardiness zones
-        - 🌍 **Soil Assessment** - pH levels and soil composition
-        - 🗺️ **Geographic Data** - Altitude and regional characteristics
-        - 🤝 **Companion Planting** - Plants that grow well together
-        
-        #### How to Get Started:
-        
-        1. **📍 Enter Your Location** - Use your garden's coordinates (find them on Google Maps)
-        2. **⚙️ Adjust Preferences** - Set the number of plants and suitability threshold
-        3. **🌿 Generate** - Click the button to create your personalized garden plan
-        4. **📥 Download** - Save your results as CSV, Excel, or visualization
-        
-        ---
-        
-        Ready to start planning your dream garden? Configure your settings in the sidebar! 🌱
+        #### 🎯 Smart Scoring
+        Plants are scored based on:
+        - Hardiness match
+        - Soil compatibility
+        - Climate suitability
+        - Water requirements
         """)
-        
-        # Feature highlights
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.markdown("""
-            #### 🎯 Smart Scoring
-            Plants are scored based on:
-            - Hardiness match
-            - Soil compatibility
-            - Climate suitability
-            - Water requirements
-            """)
-        
-        with col2:
-            st.markdown("""
-            #### 🔄 Companion Planting
-            Intelligent clustering:
-            - Groups compatible plants
-            - Identifies beneficial pairs
-            - Optimizes garden layout
-            - Maximizes yields
-            """)
-        
-        with col3:
-            st.markdown("""
-            #### 📊 Detailed Reports
-            Comprehensive outputs:
-            - Suitability scores
-            - Growing requirements
-            - Visual cluster maps
-            - Excel spreadsheets
-            """)
+    
+    with col2:
+        st.markdown("""
+        #### 🔄 Companion Planting
+        Intelligent clustering:
+        - Groups compatible plants
+        - Identifies beneficial pairs
+        - Optimizes garden layout
+        - Maximizes yields
+        """)
+    
+    with col3:
+        st.markdown("""
+        #### 📊 Detailed Reports
+        Comprehensive outputs:
+        - Suitability scores
+        - Growing requirements
+        - Visual cluster maps
+        - Excel spreadsheets
+        """)
 
 # Footer
 st.markdown("---")

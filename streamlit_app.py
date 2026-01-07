@@ -17,9 +17,10 @@ try:
         PlantClusteringModule, 
         Config
     )
+    from climate_projection import get_climate_projection_for_location
 except ImportError as e:
-    st.error(f"❌ Error importing garden_planner_core.py: {e}")
-    st.error("Please ensure garden_planner_core.py is in the same directory as this app.")
+    st.error(f"❌ Error importing modules: {e}")
+    st.error("Please ensure garden_planner_core.py and climate_projection.py are in the same directory.")
     st.stop()
 
 # Page configuration
@@ -73,12 +74,26 @@ st.markdown("""
         border-radius: 10px;
         margin: 1rem 0;
     }
+    .climate-warning {
+        background-color: #FFF3E0;
+        border-left: 4px solid #FF9800;
+        padding: 1rem;
+        border-radius: 5px;
+        margin: 1rem 0;
+    }
+    .climate-info {
+        background-color: #E3F2FD;
+        border-left: 4px solid #2196F3;
+        padding: 1rem;
+        border-radius: 5px;
+        margin: 1rem 0;
+    }
     </style>
 """, unsafe_allow_html=True)
 
 # Header
 st.markdown('<h1 class="main-header">🌱 Garden Planner</h1>', unsafe_allow_html=True)
-st.markdown('<p class="subtitle">Intelligent plant recommendations based on your location\'s environmental data</p>', unsafe_allow_html=True)
+st.markdown('<p class="subtitle">Intelligent plant recommendations with climate change projections</p>', unsafe_allow_html=True)
 
 # Sidebar Configuration
 st.sidebar.header("⚙️ Garden Configuration")
@@ -198,8 +213,12 @@ def add_legend_to_image(image_path):
 if 'results' not in st.session_state:
     st.session_state.results = None
 
+if 'climate_projection' not in st.session_state:
+    st.session_state.climate_projection = None
+
 if generate:
     st.session_state.results = None
+    st.session_state.climate_projection = None
     
     # Check for required files
     plant_db = "pfaf2.csv"
@@ -218,125 +237,207 @@ if generate:
     status_text = st.empty()
     
     try:
-        # Clean old files
-        status_text.text("🧹 Cleaning old files...")
-        progress_bar.progress(5)
-        for f in os.listdir('.'):
-            if '_recommendations.csv' in f or '_results.xlsx' in f or 'plant_clusters' in f:
-                try:
-                    os.remove(f)
-                except:
-                    pass
-        
-        # Update config
-        Config.MAX_CLUSTER_SIZE = max_cluster
-        
-        # Initialize planner
-        status_text.text("🚀 Initializing Garden Planner...")
+        status_text.text("🌍 Fetching location data...")
         progress_bar.progress(10)
         
-        planner = GardenPlanner(use_vectorized=True)
-        planner.initialize(plant_db)
+        planner = GardenPlanner(plant_db)
+        location_id = planner.setup_location(latitude, longitude, garden_name)
         
-        # Add location
-        status_text.text("📍 Fetching location data...")
+        status_text.text("🌡️ Analyzing climate data...")
         progress_bar.progress(30)
         
-        location_id = planner.add_location(latitude, longitude, garden_name)
+        # Generate climate scenarios
+        planner.generate_climate_scenarios(location_id)
         
-        # Get recommendations
-        status_text.text("🌱 Calculating plant recommendations...")
+        status_text.text("🌱 Calculating plant suitability...")
         progress_bar.progress(50)
         
-        recommendations = planner.get_recommendations(location_id, num_rec, min_score)
-        
-        if recommendations.empty:
-            progress_bar.empty()
-            status_text.empty()
-            st.warning("⚠️ No suitable plants found with the given criteria. Try lowering the minimum suitability score.")
-            st.stop()
-        
-        # Export to CSV
-        status_text.text("💾 Saving recommendations...")
-        progress_bar.progress(60)
-        
-        csv_filename = f"{garden_name.replace(' ', '_')}_recommendations.csv"
-        recommendations.to_csv(csv_filename, index=False)
-        
-        # Perform clustering
-        status_text.text("🔬 Clustering plants...")
-        progress_bar.progress(70)
-        
-        clustered_df = PlantClusteringModule.cluster_plants(recommendations, max_cluster)
-        
-        # Visualize clusters
-        status_text.text("📊 Creating visualizations...")
-        progress_bar.progress(80)
-        
-        fig = PlantClusteringModule.visualize_clusters(clustered_df, garden_name)
-        
-        # Find companion plant relationships
-        cluster_companions = {}
-        if companion_available:
-            status_text.text("🤝 Analyzing companion relationships...")
-            progress_bar.progress(85)
-            
-            cluster_companions = PlantClusteringModule.find_companions(
-                clustered_df, companion_db
-            )
-        
-        # Export to Excel
-        status_text.text("📊 Generating Excel report...")
-        progress_bar.progress(90)
-        
-        excel_filename = f"{garden_name.replace(' ', '_')}_results.xlsx"
-        PlantClusteringModule.export_to_excel(
-            clustered_df, cluster_companions, fig, garden_name, excel_filename
+        # Get recommendations
+        recommendations = planner.get_recommendations(
+            location_id, 
+            top_n=num_rec, 
+            min_score=min_score
         )
         
-        # Look for PNG files
-        status_text.text("🔍 Collecting results...")
-        progress_bar.progress(95)
+        if recommendations.empty:
+            st.error("❌ No suitable plants found for your criteria. Try lowering the minimum suitability score.")
+            progress_bar.empty()
+            status_text.empty()
+            st.stop()
         
-        png_files = [f for f in os.listdir('.') if 'plant_cluster' in f and f.endswith('.png')]
+        status_text.text("🔄 Creating plant clusters...")
+        progress_bar.progress(70)
+        
+        # Create clusters
+        csv_file, xlsx_file, png_file, num_clusters = planner.create_clusters(
+            recommendations, 
+            max_cluster, 
+            companion_available, 
+            garden_name
+        )
+        
+        # Get climate data for projection
+        status_text.text("🌍 Generating climate projections...")
+        progress_bar.progress(85)
+        
+        with planner.db.get_connection() as conn:
+            climate_data = pd.read_sql(
+                f"SELECT * FROM climate_data WHERE location_id = {location_id} AND scenario = 'current' LIMIT 1", 
+                conn
+            )
+            
+            if not climate_data.empty:
+                climate_row = climate_data.iloc[0]
+                projection, summary = get_climate_projection_for_location(
+                    latitude,
+                    longitude,
+                    float(climate_row['avg_temp']),
+                    float(climate_row['precip']),
+                    int(climate_row['frost_days']),
+                    garden_name
+                )
+                st.session_state.climate_projection = {
+                    'projection': projection,
+                    'summary': summary
+                }
+        
+        progress_bar.progress(100)
+        status_text.text("✅ Analysis complete!")
         
         # Store results
         st.session_state.results = {
-            'df': clustered_df,
-            'csv': csv_filename,
-            'xlsx': excel_filename,
-            'png': png_files,
-            'garden_name': garden_name,
-            'location': f"{latitude}, {longitude}",
-            'num_clusters': clustered_df['cluster'].nunique(),
-            'num_companions': sum(len(df) for df in cluster_companions.values()) if cluster_companions else 0
+            'csv': csv_file,
+            'xlsx': xlsx_file,
+            'png': [png_file] if png_file else [],
+            'num_clusters': num_clusters,
+            'location': f"{latitude:.4f}, {longitude:.4f}"
         }
         
-        status_text.text("✅ Complete!")
-        progress_bar.progress(100)
-        
-        import time
-        time.sleep(0.5)
-        status_text.empty()
+        # Clear progress indicators
         progress_bar.empty()
+        status_text.empty()
         
-        st.success("✅ Garden plan generated successfully!")
-        st.rerun()
+        st.success(f"✅ Generated {len(recommendations)} plant recommendations with {num_clusters} clusters!")
         
     except Exception as e:
         progress_bar.empty()
         status_text.empty()
-        st.error(f"❌ Error generating garden plan: {str(e)}")
-        with st.expander("🔍 Error Details (for debugging)"):
-            st.code(traceback.format_exc())
+        st.error(f"❌ Error during generation: {str(e)}")
+        st.code(traceback.format_exc())
         st.stop()
 
-# Display Results
+# Display results
 if st.session_state.results:
-    df = st.session_state.results['df']
+    df = pd.read_csv(st.session_state.results['csv'])
     
-    # Success message
-    st.success(f"✅ Successfully generated **{len(df)} plant recommendations** for {st.session_state.results['garden_name']}")
+    # Climate Projection Section (New!)
+    if st.session_state.climate_projection:
+        st.markdown("---")
+        st.markdown("### 🌍 Climate Change Projection (10 Years)")
+        
+        proj = st.session_state.climate_projection['projection']
+        summary = st.session_state.climate_projection['summary']
+        
+        # Impact level indicator
+        impact_colors = {
+            'low': '#4CAF50',
+            'moderate': '#FF9800',
+            'high': '#F44336',
+            'severe': '#D32F2F'
+        }
+        impact_color = impact_colors.get(proj.impact_level, '#FF9800')
+        
+        st.markdown(f"""
+        <div style='background-color: {impact_color}20; border-left: 4px solid {impact_color}; padding: 1rem; border-radius: 5px;'>
+            <h4 style='color: {impact_color}; margin: 0;'>
+                Impact Level: {proj.impact_level.upper()} 
+                <span style='font-size: 0.8em; color: #666;'>(Confidence: {proj.confidence})</span>
+            </h4>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Key metrics
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric(
+                "Temperature Change", 
+                f"+{proj.temp_change}°C",
+                f"{proj.temp_change_min} to {proj.temp_change_max}°C",
+                delta_color="inverse"
+            )
+        
+        with col2:
+            st.metric(
+                "Precipitation Change", 
+                f"{proj.precip_change:+.1f}%",
+                f"{proj.precip_change_min:+.1f} to {proj.precip_change_max:+.1f}%"
+            )
+        
+        with col3:
+            st.metric(
+                "Growing Season", 
+                f"{proj.growing_season_change:+d} days",
+                "Longer season" if proj.growing_season_change > 0 else "Shorter"
+            )
+        
+        with col4:
+            st.metric(
+                "Hardiness Zone Shift", 
+                f"+{proj.hardiness_zone_shift:.1f} zones",
+                "Warmer zones"
+            )
+        
+        # Detailed impacts
+        with st.expander("📊 Detailed Climate Impacts", expanded=True):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("**🌡️ Temperature:**")
+                st.info(summary['temperature'])
+                
+                st.markdown("**💧 Precipitation:**")
+                st.info(summary['precipitation'])
+                
+                st.markdown("**📅 Growing Season:**")
+                st.info(summary['growing_season'])
+            
+            with col2:
+                st.markdown("**⚠️ Extreme Events:**")
+                st.warning(summary['extreme_events'])
+                
+                st.markdown("**🌱 Gardening Implications:**")
+                st.success(summary['gardening_implications'])
+        
+        # What this means for your garden
+        st.markdown("#### 🌿 What This Means for Your Garden")
+        
+        recommendations_text = []
+        
+        if proj.temp_change > 1.0:
+            recommendations_text.append("🌡️ **Consider heat-tolerant varieties** - Your location will be warmer, so plants that can handle heat stress will perform better")
+        
+        if proj.precip_change < -3:
+            recommendations_text.append("💧 **Focus on drought-resistant plants** - Reduced rainfall means you'll want plants that can handle dry conditions")
+        elif proj.precip_change > 3:
+            recommendations_text.append("💧 **Ensure good drainage** - Increased rainfall means you'll want to avoid plants prone to root rot")
+        
+        if proj.growing_season_change > 10:
+            recommendations_text.append("📅 **Extended growing season** - You'll be able to grow longer-season crops and potentially get multiple harvests")
+        
+        if proj.hardiness_zone_shift >= 0.5:
+            recommendations_text.append(f"🗺️ **Hardiness zone shift** - Your garden will effectively be {proj.hardiness_zone_shift:.1f} zones warmer, opening up new plant possibilities")
+        
+        if proj.heat_wave_increase > 20:
+            recommendations_text.append("☀️ **Prepare for more heat waves** - Consider shade structures and mulching to protect plants")
+        
+        if recommendations_text:
+            for rec in recommendations_text:
+                st.markdown(rec)
+        else:
+            st.info("✅ Your climate is expected to remain relatively stable for gardening purposes")
+    
+    st.markdown("---")
     
     # Summary metrics
     st.markdown("### 📊 Garden Summary")
@@ -511,8 +612,9 @@ else:
     Get personalized plant recommendations based on your location's real environmental data including:
     
     - 🌡️ **Climate Analysis** - Temperature, rainfall, and hardiness zones
-    - 🌍 **Soil Assessment** - pH levels and soil composition
-    - 🗺️ **Geographic Data** - Altitude and regional characteristics
+    - 🌍 **Climate Projections** - Expected changes in the next 10 years
+    - 🗺️ **Soil Assessment** - pH levels and soil composition
+    - 🏔️ **Geographic Data** - Altitude and regional characteristics
     - 🤝 **Companion Planting** - Plants that grow well together
     
     #### How to Get Started:
@@ -542,6 +644,16 @@ else:
     
     with col2:
         st.markdown("""
+        #### 🌍 Climate Projections
+        See how climate change affects:
+        - Temperature trends
+        - Rainfall patterns
+        - Growing season length
+        - Plant zone shifts
+        """)
+    
+    with col3:
+        st.markdown("""
         #### 🔄 Companion Planting
         Intelligent clustering:
         - Groups compatible plants
@@ -549,22 +661,12 @@ else:
         - Optimizes garden layout
         - Maximizes yields
         """)
-    
-    with col3:
-        st.markdown("""
-        #### 📊 Detailed Reports
-        Comprehensive outputs:
-        - Suitability scores
-        - Growing requirements
-        - Visual cluster maps
-        - Excel spreadsheets
-        """)
 
 # Footer
 st.markdown("---")
 st.markdown("""
 <div style="text-align: center; color: #666; padding: 1rem;">
-    <p>🌱 <strong>Garden Planner</strong> • Powered by real environmental data and botanical science</p>
-    <p style="font-size: 0.85rem;">Data sources: Climate records, PFAF plant database, companion planting research</p>
+    <p>🌱 <strong>Garden Planner</strong> • Powered by real environmental data and climate science</p>
+    <p style="font-size: 0.85rem;">Data sources: Climate records, PFAF plant database, IPCC projections</p>
 </div>
 """, unsafe_allow_html=True)

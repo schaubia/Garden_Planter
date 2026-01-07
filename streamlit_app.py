@@ -237,48 +237,85 @@ if generate:
     status_text = st.empty()
     
     try:
-        status_text.text("🌍 Fetching location data...")
+        # Clean old files
+        status_text.text("🧹 Cleaning old files...")
+        progress_bar.progress(5)
+        for f in os.listdir('.'):
+            if '_recommendations.csv' in f or '_results.xlsx' in f or 'plant_clusters' in f:
+                try:
+                    os.remove(f)
+                except:
+                    pass
+        
+        # Update config
+        Config.MAX_CLUSTER_SIZE = max_cluster
+        
+        # Initialize planner
+        status_text.text("🚀 Initializing Garden Planner...")
         progress_bar.progress(10)
         
-        planner = GardenPlanner(plant_db)
-        location_id = planner.setup_location(latitude, longitude, garden_name)
+        planner = GardenPlanner(use_vectorized=True)
+        planner.initialize(plant_db)
         
-        status_text.text("🌡️ Analyzing climate data...")
+        # Add location
+        status_text.text("📍 Fetching location data...")
         progress_bar.progress(30)
         
-        # Generate climate scenarios
-        planner.generate_climate_scenarios(location_id)
-        
-        status_text.text("🌱 Calculating plant suitability...")
-        progress_bar.progress(50)
+        location_id = planner.add_location(latitude, longitude, garden_name)
         
         # Get recommendations
-        recommendations = planner.get_recommendations(
-            location_id, 
-            top_n=num_rec, 
-            min_score=min_score
-        )
+        status_text.text("🌱 Calculating plant recommendations...")
+        progress_bar.progress(50)
+        
+        recommendations = planner.get_recommendations(location_id, num_rec, min_score)
         
         if recommendations.empty:
-            st.error("❌ No suitable plants found for your criteria. Try lowering the minimum suitability score.")
             progress_bar.empty()
             status_text.empty()
+            st.warning("⚠️ No suitable plants found with the given criteria. Try lowering the minimum suitability score.")
             st.stop()
         
-        status_text.text("🔄 Creating plant clusters...")
+        # Export to CSV
+        status_text.text("💾 Saving recommendations...")
+        progress_bar.progress(60)
+        
+        csv_filename = f"{garden_name.replace(' ', '_')}_recommendations.csv"
+        recommendations.to_csv(csv_filename, index=False)
+        
+        # Perform clustering
+        status_text.text("🔬 Clustering plants...")
         progress_bar.progress(70)
         
-        # Create clusters
-        csv_file, xlsx_file, png_file, num_clusters = planner.create_clusters(
-            recommendations, 
-            max_cluster, 
-            companion_available, 
-            garden_name
+        clustered_df = PlantClusteringModule.cluster_plants(recommendations, max_cluster)
+        
+        # Visualize clusters
+        status_text.text("📊 Creating visualizations...")
+        progress_bar.progress(75)
+        
+        fig = PlantClusteringModule.visualize_clusters(clustered_df, garden_name)
+        
+        # Find companion plant relationships
+        cluster_companions = {}
+        if companion_available:
+            status_text.text("🤝 Analyzing companion relationships...")
+            progress_bar.progress(80)
+            
+            cluster_companions = PlantClusteringModule.find_companions(
+                clustered_df, companion_db
+            )
+        
+        # Export to Excel
+        status_text.text("📊 Generating Excel report...")
+        progress_bar.progress(85)
+        
+        excel_filename = f"{garden_name.replace(' ', '_')}_results.xlsx"
+        PlantClusteringModule.export_to_excel(
+            clustered_df, cluster_companions, fig, garden_name, excel_filename
         )
         
         # Get climate data for projection
         status_text.text("🌍 Generating climate projections...")
-        progress_bar.progress(85)
+        progress_bar.progress(90)
         
         with planner.db.get_connection() as conn:
             climate_data = pd.read_sql(
@@ -301,34 +338,45 @@ if generate:
                     'summary': summary
                 }
         
-        progress_bar.progress(100)
-        status_text.text("✅ Analysis complete!")
+        # Look for PNG files
+        status_text.text("🔍 Collecting results...")
+        progress_bar.progress(95)
+        
+        png_files = [f for f in os.listdir('.') if 'plant_cluster' in f and f.endswith('.png')]
         
         # Store results
         st.session_state.results = {
-            'csv': csv_file,
-            'xlsx': xlsx_file,
-            'png': [png_file] if png_file else [],
-            'num_clusters': num_clusters,
-            'location': f"{latitude:.4f}, {longitude:.4f}"
+            'df': clustered_df,
+            'csv': csv_filename,
+            'xlsx': excel_filename,
+            'png': png_files,
+            'garden_name': garden_name,
+            'location': f"{latitude}, {longitude}",
+            'num_clusters': clustered_df['cluster'].nunique(),
+            'num_companions': sum(len(df) for df in cluster_companions.values()) if cluster_companions else 0
         }
         
-        # Clear progress indicators
-        progress_bar.empty()
-        status_text.empty()
+        status_text.text("✅ Complete!")
+        progress_bar.progress(100)
         
-        st.success(f"✅ Generated {len(recommendations)} plant recommendations with {num_clusters} clusters!")
+        import time
+        time.sleep(0.5)
+        status_text.empty()
+        progress_bar.empty()
+        
+        st.success("✅ Garden plan generated successfully!")
+        st.rerun()
         
     except Exception as e:
         progress_bar.empty()
         status_text.empty()
-        st.error(f"❌ Error during generation: {str(e)}")
-        st.code(traceback.format_exc())
-        st.stop()
+        st.error(f"❌ Error generating garden plan: {str(e)}")
+        with st.expander("🔍 Error Details (for debugging)"):
+            st.code(traceback.format_exc())
 
 # Display results
 if st.session_state.results:
-    df = pd.read_csv(st.session_state.results['csv'])
+    df = st.session_state.results['df']
     
     # Climate Projection Section (New!)
     if st.session_state.climate_projection:

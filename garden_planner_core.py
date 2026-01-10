@@ -60,8 +60,8 @@ class Config:
     
     WEIGHTS = {
         'hardiness': 0.4,
-        'shade': 0.15,
-        'moisture': 0.15,
+        'shade': 0.25,
+        'moisture': 0.25,
         'soil': 0.25,
         'physical': 0.20,
         'usefulness': 0.10,

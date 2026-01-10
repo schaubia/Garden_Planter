@@ -40,7 +40,6 @@ source venv/bin/activate
 
 ### Running the Program
 
-Simply run the main script:
 
 ```bash
 python garden_planner_main.py

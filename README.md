@@ -122,6 +122,12 @@ Evaluates plants based on:
 - Shows which plants help or harm each other
 - Provides relationship details per cluster
 
+**Features:**
+- ✅ **Synonym mapping** for 20+ plant categories
+- ✅ **Smart name normalization** 
+- ✅ **Flexible matching** (exact, substring, word boundary)
+- ✅ **Handles plurals, commas, special cases**
+
 ## 🔍 Understanding the Results
 
 ### Suitability Scores

@@ -606,6 +606,130 @@ class VectorizedPlantSuitabilityCalculator:
 
 
 # ============================================================================
+# COMPANION PLANT MATCHING HELPER
+# ============================================================================
+
+class CompanionMatcher:
+    """Enhanced companion plant matching with synonym support"""
+    
+    # Mapping of companion plant terms to common variations
+    SYNONYM_MAP = {
+        # Alliums family
+        'alliums': ['onion', 'garlic', 'leek', 'chive', 'shallot', 'scallion', 'allium'],
+        
+        # Brassicas family
+        'brassicas': ['cabbage', 'broccoli', 'cauliflower', 'kale', 'brussels sprout', 
+                      'kohlrabi', 'turnip', 'radish', 'mustard'],
+        
+        # Nightshades
+        'nightshades': ['tomato', 'potato', 'pepper', 'eggplant', 'capsicum', 'aubergine'],
+        
+        # Beans
+        'beans': ['bean', 'fava', 'broad bean', 'runner bean', 'french bean', 
+                  'kidney bean', 'navy bean', 'pinto bean', 'black bean', 'lima bean'],
+        'beans, bush': ['bush bean', 'bean'],
+        'beans, pole': ['pole bean', 'runner bean', 'bean'],
+        
+        # Squash family
+        'squash': ['pumpkin', 'zucchini', 'courgette', 'marrow', 'gourd', 'squash'],
+        'cucurbits': ['cucumber', 'melon', 'pumpkin', 'squash', 'zucchini', 'gourd'],
+        
+        # Grains
+        'corn': ['maize', 'sweet corn', 'corn'],
+        'wheat': ['wheat', 'triticum'],
+        
+        # Herbs
+        'mint': ['peppermint', 'spearmint', 'mentha', 'mint'],
+        'basil': ['basil', 'ocimum'],
+        'parsley': ['parsley', 'petroselinum'],
+        
+        # Fruits
+        'fruit trees': ['apple', 'pear', 'cherry', 'plum', 'peach', 'apricot', 
+                       'fig', 'mulberry', 'citrus', 'orange', 'lemon'],
+        'berries': ['strawberry', 'raspberry', 'blackberry', 'blueberry', 
+                   'currant', 'gooseberry'],
+        
+        # Other vegetables
+        'carrots': ['carrot'],
+        'tomatoes': ['tomato'],
+        'potatoes': ['potato'],
+        'peppers': ['pepper', 'capsicum'],
+        'cabbages': ['cabbage'],
+        'lettuce': ['lettuce'],
+        'cucumbers': ['cucumber'],
+        'peas': ['pea'],
+        'spinach': ['spinach'],
+    }
+    
+    @staticmethod
+    def normalize_name(name: str) -> str:
+        """Normalize plant name for matching"""
+        if not name or pd.isna(name):
+            return ""
+        
+        name = str(name).lower().strip()
+        
+        # Remove common suffixes that might interfere
+        name = re.sub(r'\s+(tree|plant|bush|shrub|vine)$', '', name)
+        
+        # Handle comma-separated names like "beans, bush"
+        if ',' in name:
+            # Take the main part before comma
+            name = name.split(',')[0].strip()
+        
+        return name
+    
+    @staticmethod
+    def get_search_terms(companion_name: str) -> set:
+        """
+        Get all search terms for a companion plant name
+        Returns both the original name and any synonyms
+        """
+        normalized = CompanionMatcher.normalize_name(companion_name)
+        search_terms = {normalized}
+        
+        # Add synonyms if available
+        if normalized in CompanionMatcher.SYNONYM_MAP:
+            search_terms.update(CompanionMatcher.SYNONYM_MAP[normalized])
+        
+        # Also check the original (non-normalized) in case it's in the map
+        original_lower = str(companion_name).lower().strip()
+        if original_lower in CompanionMatcher.SYNONYM_MAP:
+            search_terms.update(CompanionMatcher.SYNONYM_MAP[original_lower])
+        
+        return search_terms
+    
+    @staticmethod
+    def plant_name_matches(plant_name: str, search_terms: set) -> bool:
+        """
+        Check if a plant name matches any of the search terms
+        Uses word boundary matching to avoid false positives
+        """
+        if not plant_name:
+            return False
+        
+        plant_name_normalized = CompanionMatcher.normalize_name(plant_name)
+        
+        for term in search_terms:
+            # Exact match
+            if term == plant_name_normalized:
+                return True
+            
+            # Substring match with some flexibility
+            # "tomato" matches "cherry tomato", "tree tomato", etc.
+            if term in plant_name_normalized or plant_name_normalized in term:
+                return True
+            
+            # Word boundary match - term appears as a complete word
+            # This prevents "pea" from matching "chickpea"
+            pattern = r'\b' + re.escape(term) + r'\b'
+            if re.search(pattern, plant_name_normalized):
+                return True
+        
+        return False
+
+
+# ============================================================================
 # CLUSTERING MODULE
 # ============================================================================
 
@@ -704,23 +828,35 @@ class PlantClusteringModule:
     
     @staticmethod
     def find_companions(df: pd.DataFrame, companion_csv: str) -> Dict[int, pd.DataFrame]:
-        """Find companion plant relationships within clusters"""
+        """Find companion plant relationships within clusters using improved matching"""
         suit = pd.read_csv(companion_csv)
         cluster_companions = {}
         
         for cl in sorted(df["cluster"].unique()):
             cluster_plants = df[df["cluster"] == cl]
-            cluster_names = cluster_plants["common_name"].fillna("").str.lower().tolist()
+            cluster_names = cluster_plants["common_name"].fillna("").tolist()
             
             matching_rows = []
             
             for idx, row in suit.iterrows():
-                source_node = str(row["Source Node"]).lower()
-                dest_node = str(row["Destination Node"]).lower()
+                source_node = str(row["Source Node"])
+                dest_node = str(row["Destination Node"])
                 
-                source_in_cluster = any(name in source_node or source_node in name for name in cluster_names if name)
-                dest_in_cluster = any(name in dest_node or dest_node in name for name in cluster_names if name)
+                # Get search terms for both source and destination (with synonyms)
+                source_terms = CompanionMatcher.get_search_terms(source_node)
+                dest_terms = CompanionMatcher.get_search_terms(dest_node)
                 
+                # Check if any cluster plant matches source or destination
+                source_in_cluster = any(
+                    CompanionMatcher.plant_name_matches(name, source_terms) 
+                    for name in cluster_names
+                )
+                dest_in_cluster = any(
+                    CompanionMatcher.plant_name_matches(name, dest_terms) 
+                    for name in cluster_names
+                )
+                
+                # Both plants must be in the same cluster
                 if source_in_cluster and dest_in_cluster:
                     matching_rows.append(row)
             

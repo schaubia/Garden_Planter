@@ -1,6 +1,6 @@
 """
 Climate Change Projection Module
-Analyzes current climate data and projects changes for the next 10 years
+Analyzes current climate data and projects changes for the next 5 years
 Based on IPCC data and regional climate models
 """
 
@@ -137,7 +137,7 @@ class ClimateChangeProjector:
                            current_precip: float,
                            current_frost_days: int,
                            location_name: str = "Your Location",
-                           years_ahead: int = 10) -> ClimateProjection:
+                           years_ahead: int = 5) -> ClimateProjection:
         """
         Calculate climate projection for a location
         
@@ -148,7 +148,7 @@ class ClimateChangeProjector:
             current_precip: Current annual precipitation (mm)
             current_frost_days: Current frost days per year
             location_name: Name of location
-            years_ahead: Years into the future (default 10)
+            years_ahead: Years into the future (default 5)
         
         Returns:
             ClimateProjection object with all projected changes

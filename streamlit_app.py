@@ -381,7 +381,7 @@ if st.session_state.results:
     # Climate Projection Section (New!)
     if st.session_state.climate_projection:
         st.markdown("---")
-        st.markdown("### 🌍 Climate Change Projection (10 Years)")
+        st.markdown("### 🌍 Climate Change Projection (5 Years)")
         
         proj = st.session_state.climate_projection['projection']
         summary = st.session_state.climate_projection['summary']
@@ -660,7 +660,7 @@ else:
     Get personalized plant recommendations based on your location's real environmental data including:
     
     - 🌡️ **Climate Analysis** - Temperature, rainfall, and hardiness zones
-    - 🌍 **Climate Projections** - Expected changes in the next 10 years
+    - 🌍 **Climate Projections** - Expected changes in the next 5 years
     - 🗺️ **Soil Assessment** - pH levels and soil composition
     - 🏔️ **Geographic Data** - Altitude and regional characteristics
     - 🤝 **Companion Planting** - Plants that grow well together

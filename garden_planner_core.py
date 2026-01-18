@@ -63,7 +63,7 @@ class Config:
         'shade': 0.25,
         'moisture': 0.25,
         'soil': 0.25,
-        'physical': 0.20,
+        'physical': 0.15,
         'usefulness': 0.10,
     }
     

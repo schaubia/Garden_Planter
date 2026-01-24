@@ -136,10 +136,13 @@ with st.sidebar:
         st.markdown("""
         **Popular cities:**
         - Sofia: `42.6977, 23.3219`
+        - Plovdiv: `42.1369, 24.7827`
+        - Varna: `43.21, 27.9361`
         - London: `51.5074, -0.1278`
         - New York: `40.7128, -74.0060`
         - Paris: `48.8566, 2.3522`
         - Tokyo: `35.6762, 139.6503`
+        - Buenos Aires: `-34.6067, -58.4362`
         """)
 
 # Field abbreviation explanations
